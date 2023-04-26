@@ -191,6 +191,35 @@ class Game {
         }
         return true;
     }
+    getSquareIndexById(id) {
+        for (let i = 0; i < this.squares.length; ++i) {
+            if (this.squares[i].id === id) return i;
+        }
+        console.error('Square with given ID does not exist', id, this.squares);
+        return null;
+    }
+    getRowIndexBySquareId(id) {
+        let squareIndex = this.getSquareIndexById(id);
+        return Math.trunc(squareIndex / 9);
+    }
+    removeUsedRowBySquareId(id) {
+        const rowIndex = this.getRowIndexBySquareId(id);
+        if (rowIndex < 0 || (rowIndex + 2) * 9 >= this.squares.length) {
+            console.error('Not allowed to remove a row that is one of the last ones or negative', rowIndex, this.squares);
+            return false;
+        }
+        let indices = [];
+        for (let i = rowIndex * 9; i < (rowIndex + 1) * 9; ++i) {
+            indices.push(i);
+        }
+        let countUsed = count(indices, (i) => this.isUsed(i));
+        if (countUsed < 9) {
+            console.error('Cannot hide row with an unused square', countUsed, rowIndex, this.squares);
+            return false;
+        }
+        this.squares = this.squares.splice(rowIndex * 9, 9);
+        return true;
+    }
 }
 
 // GAME VIEW INTERMEDIATE STATE
@@ -461,6 +490,12 @@ class GameView {
         }
     }
     onClick(id) {
+        if (this.game.getSquareById(id).state === SquareStatus.USED) {
+            if (this.game.removeUsedRowBySquareId(id)) {
+                this.queueUpdates();
+            }
+            return;
+        }
         if (this.game.toggleSelection(id)) {
             this.queueUpdates();
         }
