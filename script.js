@@ -625,12 +625,17 @@ class Bot {
         this.asyncExe = new AsyncRepeatingExecutor(() => this.nextAction());
         this.asyncExe.start();
         this.gameView.dom.addBot(() => this.asyncExe.togglePause());
+        this.actionCount = 0;
     }
     nextAction() {
         if (this.gameView.eventQueue.eventQueue.length > 100) {
             console.log('Bot waiting due for DOM updates');
             return;
         }
+        if (this.actionCount % 100 === 0) {
+            this.logStats();
+        }
+        ++this.actionCount;
         if (this.removeUsedRow()) return;
         if (this.matchSquares()) return;
         if (this.copyUnusedSquares()) return;
@@ -652,6 +657,7 @@ class Bot {
         for (let i1 = 0; i1 < squares.length; ++i1) {
             for (let i2 = i1 + 1; i2 < squares.length; ++i2) {
                 if (this.gameView.game.areMatchingSquares(i1, i2)) {
+//                    if (Math.random() < 0.01) continue;
                     this.gameView.onClick(squares[i1].id);
                     this.gameView.onClick(squares[i2].id);
                     return true;
@@ -666,6 +672,16 @@ class Bot {
             return true;
         }
         return false;
+    }
+    logStats() {
+        const squares = this.gameView.game.squares;
+        let counts = [];
+        let used = count(squares, (sq) => sq.state === SquareStatus.USED);
+        for (let i = 1; i <= 9; ++i) {
+            let c = count(squares, (sq) => sq.value === i);
+            counts.push(i+'='+c+'('+(c/squares.length*100).toFixed(0)+'%)');
+        }
+        console.log('Stats', this.actionCount, squares.length, used + '(' + (used/squares.length*100).toFixed(0)+'%)', ...counts);
     }
 }
 
