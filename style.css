@@ -34,8 +34,17 @@
 .grid-square.sq-used {
   background-color: black;
   color: #303030;
+  cursor: not-allowed;
+}
+
+.grid-square.sq-active:hover {
+  background-color: #DDDDDD;
 }
 
 .grid-square.sq-selected {
-  background-color: blue;
+  background-color: #8888FF;
+}
+
+.grid-square.sq-selected:hover {
+  background-color: #AAAAFF;
 }

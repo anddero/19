@@ -9,6 +9,22 @@ function map(arr, mapper) {
     return newArr;
 }
 
+function count(arr, predicate) {
+    let c = 0;
+    for (let i = 0; i < arr.length; ++i) {
+        if (predicate(arr[i]) === true) ++c;
+    }
+    return c;
+}
+
+function findAll(arr, predicate) {
+    let indexes = [];
+    for (let i = 0; i < arr.length; ++i) {
+        if (predicate(arr[i]) === true) indexes.push(i);
+    }
+    return indexes;
+}
+
 class AsyncJobExecutor {
     constructor() {
         this.jobQueue = [];
@@ -57,11 +73,123 @@ class Game {
         this.squares.push(new Square(this.idCounter, value));
         return this.idCounter++;
     }
-    getSquare(id) {
+    leftIndex(index) {
+        return index - 1;
+    }
+    rightIndex(index) {
+        return index + 1;
+    }
+    upIndex(index) {
+        return index - 9;
+    }
+    downIndex(index) {
+        return index + 9;
+    }
+    getSquareByIndex(index) {
+        if (index < 0 || index >= this.squares.length) return null;
+        return this.squares[index];
+    }
+    left(index) {
+        return getSquareByIndex(leftIndex(index));
+    }
+    right(index) {
+        return getSquareByIndex(rightIndex(index));
+    }
+    up(index) {
+        return getSquareByIndex(upIndex(index));
+    }
+    down(index) {
+        return getSquareByIndex(downIndex(index));
+    }
+    getSquareById(id) {
         return this.squares.find(sq => sq.id === id);
     }
-    setSquareState(id, state) {
-        this.getSquare(id).state = state;
+    isUsed(i) {
+        return this.squares[i].state === SquareStatus.USED;
+    }
+    areNearH(a, b) {
+        if (a >= b) console.error("Expected a < b", a, b, this.squares);
+        for (let i = a + 1; i <= b; ++i) {
+            if (!this.isUsed(i)) return i === b;
+        }
+        return false;
+    }
+    areNearV(a, b) {
+        if (a >= b) console.error("Expected a < b", a, b, this.squares);
+        for (let i = a + 9; i <= b; i += 9) {
+            if (!this.isUsed(i)) return i === b;
+        }
+        return false;
+    }
+    areNear(a, b) {
+        if (a >= b) console.error("Expected a < b", a, b, this.squares);
+        return this.areNearH(a, b) || this.areNearV(a, b)
+    }
+    init() {
+        if (this.squares.length > 0) {
+            console.error('Game state is already initialized', this.squares);
+            return false;
+        }
+        for (let i = 1; i <= 9; ++i) {
+            this.addSquare(i);
+        }
+        for (let i = 1; i <= 9; ++i) {
+            this.addSquare(1);
+            this.addSquare(i);
+        }
+        return true;
+    }
+    toggleSelection(id) {
+        let sq = this.getSquareById(id);
+        if (sq.state == SquareStatus.ACTIVE) {
+            let selectedCount = this.countSelectedSquares();
+            if (selectedCount > 2) console.error("Shouldn't be possible to have more than 2 squares selected, invalid state", this.squares);
+            else if (selectedCount === 2) console.error("Already 2 squares selected", this.squares);
+            else {
+                sq.state = SquareStatus.SELECTED;
+                return true;
+            }
+        } else if (sq.state == SquareStatus.SELECTED) {
+            sq.state = SquareStatus.ACTIVE;
+            return true;
+        }
+        console.error("Cannot select this square", id, this.squares);
+        return false;
+    }
+    getSelectedSquaresIndexes() {
+        return findAll(this.squares, (sq) => sq.state == SquareStatus.SELECTED);
+    }
+    countSelectedSquares() {
+        return count(this.squares, (sq) => sq.state == SquareStatus.SELECTED);
+    }
+    useSelectedSquares() {
+        let indexes = this.getSelectedSquaresIndexes();
+        if (indexes.length > 2) console.error("Shouldn't be possible to have more than 2 squares selected, invalid state", indexes, this.squares);
+        else if (indexes.length < 2) console.error("Need to select exactly 2 squares to use them", indexes, this.squares);
+        else {
+            const sq1 = this.squares[indexes[0]];
+            const sq2 = this.squares[indexes[1]];
+            if (sq1.value + sq2.value !== 10 && sq1.value !== sq2.value) console.error("Invalid selection made, square values need to add up to 10 or be equal", sq1, sq2, indexes, this.squares);
+            else if (!this.areNear(indexes[0], indexes[1])) console.error("Invalid selection made, squares must be consecutive", sq1, sq2, indexes, this.squares);
+            else {
+                sq1.state = SquareStatus.USED;
+                sq2.state = SquareStatus.USED;
+                return true;
+            }
+        }
+        console.error("Couldn't use up the squares", indexes, this.squares);
+        return false;
+    }
+    copyUnusedSquares() {
+        let indexes = findAll(this.squares, (sq) => sq.state !== SquareStatus.USED);
+        if (indexes.length === 0) {
+            console.error("Nothing to copy", this.squares);
+            return false;
+        }
+        for (let i = 0; i < indexes.length; ++i) {
+            this.addSquare(this.squares[indexes[i]].value);
+        }
+        return true;
     }
 }
 
@@ -231,13 +359,15 @@ class GameViewEventQueue {
 // GAME VIEW DOM
 
 class GameViewDOM {
-    constructor(pauseToggle) {
+    constructor(pauseToggle, copyCallback) {
         this.gridEl = document.getElementById('grid-container');
         while (this.gridEl.childNodes.length > 0) {
             this.gridEl.firstChild.remove();
         }
         const pauseEl = document.getElementById('pause-button');
         pauseEl.onclick = pauseToggle;
+        const copyEl = document.getElementById('copy-button');
+        copyEl.onclick = copyCallback;
     }
     addRow() {
         const row = document.createElement('div');
@@ -275,7 +405,7 @@ class GameViewDOM {
     }
     check(squares) {
         let rowCount = this.gridEl.childNodes.length;
-        if (squares.length / 9 !== rowCount) {
+        if (rowCount * 9 < squares.length || (rowCount - 1) * 9 >= squares.length) {
             console.error('Invalid row count', rowCount, squares);
         }
         for (let row = 0; row < rowCount; ++row) {
@@ -313,7 +443,7 @@ class GameView {
     constructor() {
         this.game = new Game();
         this.eventQueue = new GameViewEventQueue(this.game.squares);
-        this.dom = new GameViewDOM(() => this.togglePause());
+        this.dom = new GameViewDOM(() => this.togglePause(), () => this.copyUnusedSquares());
         this.asyncExe = new AsyncJobExecutor();
         this.asyncExe.start();
     }
@@ -331,23 +461,22 @@ class GameView {
         }
     }
     onClick(id) {
-        let sq = this.game.getSquare(id);
-        if (sq.state == SquareStatus.ACTIVE) {
-            this.game.setSquareState(id, SquareStatus.SELECTED);
-        } else if (sq.state == SquareStatus.SELECTED) {
-            this.game.setSquareState(id, SquareStatus.ACTIVE);
+        if (this.game.toggleSelection(id)) {
+            this.queueUpdates();
         }
-        this.queueUpdates();
+        if (this.game.countSelectedSquares() >= 2 && this.game.useSelectedSquares()) {
+            this.queueUpdates();
+        }
     }
-    createInitialState() {
-        for (let i = 1; i <= 9; ++i) {
-            this.game.addSquare(i);
+    copyUnusedSquares() {
+        if (this.game.copyUnusedSquares()) {
+            this.queueUpdates();
         }
-        for (let i = 1; i <= 9; ++i) {
-            this.game.addSquare(1);
-            this.game.addSquare(i);
+    }
+    init() {
+        if (this.game.init()) {
+            this.queueUpdates();
         }
-        this.queueUpdates();
     }
     renderSingleUpdate() {
         let event = this.eventQueue.takeNextEvent();
@@ -378,4 +507,4 @@ class GameView {
 }
 
 const gameView = new GameView();
-gameView.createInitialState();
+gameView.init();
