@@ -29,12 +29,15 @@
   font-weight: bold;
   font-size: x-large;
   cursor: grab;
+  opacity: 1;
+  animation: fadeIn 0.5s ease-in-out;
 }
 
 .grid-square.sq-used {
   background-color: black;
   color: #303030;
   cursor: not-allowed;
+  transition: background-color 0.2s ease-in-out;
 }
 
 .grid-square.sq-active:hover {
@@ -43,8 +46,18 @@
 
 .grid-square.sq-selected {
   background-color: #8888FF;
+  transition: background-color 0.2s ease-in-out;
 }
 
 .grid-square.sq-selected:hover {
   background-color: #AAAAFF;
+}
+
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }

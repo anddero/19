@@ -25,16 +25,13 @@ function findAll(arr, predicate) {
     return indexes;
 }
 
-class AsyncJobExecutor {
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class AsyncExecutor {
     constructor() {
-        this.jobQueue = [];
         this.running = false;
-    }
-    schedule(job) {
-        this.jobQueue.push(job);
-    }
-    wait(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
     }
     stop() {
         this.running = false;
@@ -42,9 +39,43 @@ class AsyncJobExecutor {
     async start() {
         this.running = true;
         while (this.running) {
-            if (this.jobQueue.length > 0) this.jobQueue.shift()()
-            await this.wait(100);
+            this.singleJobRunImpl();
+            await wait(200);
         }
+    }
+    togglePause() {
+        if (this.running) {
+            this.stop();
+        } else {
+            this.start();
+        }
+    }
+    singleJobRunImpl() {
+        console.error('AsyncExecutor singleJobRunImpl not implemented');
+    }
+}
+
+class AsyncJobExecutor extends AsyncExecutor {
+    constructor() {
+        super();
+        this.jobQueue = [];
+    }
+    schedule(job) {
+        this.jobQueue.push(job);
+    }
+    singleJobRunImpl() {
+        if (this.jobQueue.length > 0) this.jobQueue.shift()()
+    }
+}
+
+class AsyncRepeatingExecutor extends AsyncExecutor {
+    constructor(job) {
+        super();
+        this.job = job;
+        this.running = false;
+    }
+    singleJobRunImpl() {
+        this.job();
     }
 }
 
@@ -162,23 +193,47 @@ class Game {
     countSelectedSquares() {
         return count(this.squares, (sq) => sq.state == SquareStatus.SELECTED);
     }
+    areMatchingSquares(i1, i2) {
+        if (i1 === i2) {
+            console.error("i1 === i2", i1, i2, this);
+            return false;
+        }
+        if (i1 > i2) {
+            console.error("Expected i1 < i2", i1, i2, this);
+            let tmp = i2;
+            i2 = i1;
+            i1 = tmp;
+        }
+        const sq1 = this.squares[i1];
+        const sq2 = this.squares[i2];
+        if (sq1.state === SquareStatus.USED || sq2.state === SquareStatus.USED) return false;
+        if (sq1.value + sq2.value !== 10 && sq1.value !== sq2.value) return false;//console.error("Invalid selection made, square values need to add up to 10 or be equal", sq1, sq2, indexes, this.squares);
+        if (!this.areNear(i1, i2)) return false;// console.error("Invalid selection made, squares must be consecutive", sq1, sq2, indexes, this.squares);
+        return true;
+    }
     useSelectedSquares() {
         let indexes = this.getSelectedSquaresIndexes();
         if (indexes.length > 2) console.error("Shouldn't be possible to have more than 2 squares selected, invalid state", indexes, this.squares);
         else if (indexes.length < 2) console.error("Need to select exactly 2 squares to use them", indexes, this.squares);
         else {
-            const sq1 = this.squares[indexes[0]];
-            const sq2 = this.squares[indexes[1]];
-            if (sq1.value + sq2.value !== 10 && sq1.value !== sq2.value) console.error("Invalid selection made, square values need to add up to 10 or be equal", sq1, sq2, indexes, this.squares);
-            else if (!this.areNear(indexes[0], indexes[1])) console.error("Invalid selection made, squares must be consecutive", sq1, sq2, indexes, this.squares);
-            else {
-                sq1.state = SquareStatus.USED;
-                sq2.state = SquareStatus.USED;
-                return true;
+            if (!this.areMatchingSquares(indexes[0], indexes[1])) {
+                console.error("Not matching squares", indexes, this);
+                return false;
             }
+            this.squares[indexes[0]].state = SquareStatus.USED;
+            this.squares[indexes[1]].state = SquareStatus.USED;
+            return true;
         }
         console.error("Couldn't use up the squares", indexes, this.squares);
         return false;
+    }
+    canCopyUnusedSquares() {
+        let indexes = findAll(this.squares, (sq) => sq.state !== SquareStatus.USED);
+        if (indexes.length === 0) {
+//            console.error("Nothing to copy", this.squares);
+            return false;
+        }
+        return true;
     }
     copyUnusedSquares() {
         let indexes = findAll(this.squares, (sq) => sq.state !== SquareStatus.USED);
@@ -198,14 +253,16 @@ class Game {
         console.error('Square with given ID does not exist', id, this.squares);
         return null;
     }
+    getRowIndexBySquareIndex(i) {
+        return Math.trunc(i / 9);
+    }
     getRowIndexBySquareId(id) {
         let squareIndex = this.getSquareIndexById(id);
-        return Math.trunc(squareIndex / 9);
+        return this.getRowIndexBySquareIndex(squareIndex);
     }
-    removeUsedRowBySquareId(id) {
-        const rowIndex = this.getRowIndexBySquareId(id);
+    canRemoveRow(rowIndex) {
         if (rowIndex < 0 || (rowIndex + 2) * 9 >= this.squares.length) {
-            console.error('Not allowed to remove a row that is one of the last ones or negative', rowIndex, this.squares);
+//            console.error('Not allowed to remove a row that is one of the last ones or negative', rowIndex, this.squares);
             return false;
         }
         let indices = [];
@@ -214,10 +271,22 @@ class Game {
         }
         let countUsed = count(indices, (i) => this.isUsed(i));
         if (countUsed < 9) {
-            console.error('Cannot hide row with an unused square', countUsed, rowIndex, this.squares);
+//            console.error('Cannot hide row with an unused square', countUsed, rowIndex, this.squares);
             return false;
         }
-        this.squares = this.squares.splice(rowIndex * 9, 9);
+        return true;
+    }
+    canRemoveRowBySquareIndex(i) {
+        return this.canRemoveRow(this.getRowIndexBySquareIndex(i));
+    }
+    removeUsedRowBySquareId(id) {
+//        console.log('removeUsedRowBySquareId', id, this);
+        const rowIndex = this.getRowIndexBySquareId(id);
+        if (!this.canRemoveRow(rowIndex)) {
+            console.error('Cannot remove this row', id, rowIndex, this.squares);
+            return false;
+        }
+        this.squares.splice(rowIndex * 9, 9);
         return true;
     }
 }
@@ -300,12 +369,12 @@ class GameViewEventQueue {
         let rowIndex = 0;
         while (true) {
             let firstSqIndex = 9 * rowIndex;
-            let prevStateHasRow = prevState.length > firstSqIndex;
-            let newStateHasRow = newState.length > firstSqIndex;
+            let prevStateHasRow = prevState.squares.length > firstSqIndex;
+            let newStateHasRow = newState.squares.length > firstSqIndex;
             if (prevStateHasRow) {
                 if (newStateHasRow) {
-                    let prevSq = prevState[firstSqIndex];
-                    let newSq = newState[firstSqIndex];
+                    let prevSq = prevState.squares[firstSqIndex];
+                    let newSq = newState.squares[firstSqIndex];
                     if (newSq.id > prevSq.id) return rowIndex;
                     else if (newSq.id < prevSq.id) console.error('New sq ID < prev sq ID', rowIndex, prevState, newState);
                 } else {
@@ -331,6 +400,7 @@ class GameViewEventQueue {
     }
 
     calcStateChangeEvents(prevState, newState) {
+//        console.log('calcStateChangeEvents', prevState, newState);
         let stateChangeEvents = [];
         for (let i = 0; i < prevState.squares.length; ++i) {
             let prevSq = prevState.squares[i];
@@ -358,6 +428,7 @@ class GameViewEventQueue {
     }
 
     calcEvents(prevState, newState) {
+//        console.log('calcEvents', prevState, newState);
         let hideRowEvents = [];
         [hideRowEvents, prevState] = this.calcHideRowEvents(prevState, newState);
         let stateChangeEvents = [];
@@ -371,6 +442,7 @@ class GameViewEventQueue {
     }
 
     queueUpdates(squares) {
+//        console.log('queueUpdates', squares);
         let newState = GameViewState.fromSquares(squares);
         let events = [];
         [events, newState] = this.calcEvents(this.latestState, newState);
@@ -397,6 +469,12 @@ class GameViewDOM {
         pauseEl.onclick = pauseToggle;
         const copyEl = document.getElementById('copy-button');
         copyEl.onclick = copyCallback;
+        this.botToggle = () => console.error("No bot added");
+        const botEl = document.getElementById('toggle-bot-button');
+        botEl.onclick = () => this.botToggle();
+    }
+    addBot(toggleCallback) {
+        this.botToggle = toggleCallback;
     }
     addRow() {
         const row = document.createElement('div');
@@ -422,6 +500,9 @@ class GameViewDOM {
         const text = document.createTextNode(value.toString());
         sq.appendChild(text);
         sq.onclick = onClick;
+        /*sq.addEventListener('transitionend', () => {
+          sq.classList.remove('fade-in');
+        });*/
         const r = this.lastRow()
         r.appendChild(sq);
     }
@@ -472,18 +553,13 @@ class GameView {
     constructor() {
         this.game = new Game();
         this.eventQueue = new GameViewEventQueue(this.game.squares);
-        this.dom = new GameViewDOM(() => this.togglePause(), () => this.copyUnusedSquares());
         this.asyncExe = new AsyncJobExecutor();
         this.asyncExe.start();
-    }
-    togglePause() {
-        if (this.asyncExe.running) {
-            this.asyncExe.stop();
-        } else {
-            this.asyncExe.start();
-        }
+        this.dom = new GameViewDOM(() => this.asyncExe.togglePause(), () => this.copyUnusedSquares());
+        this.init();
     }
     queueUpdates() {
+//        console.log('GameView::queueUpdates', this);
         const count = this.eventQueue.queueUpdates(this.game.squares);
         for (let i = 0; i < count; ++i) {
             this.asyncExe.schedule(() => this.renderSingleUpdate());
@@ -521,7 +597,7 @@ class GameView {
         } else if (event.type === GameViewEventType.HIDE_ROW) {
             this.dom.hideRow(event.index);
         } else if (event.type === GameViewEventType.UPDATE_SQUARE) {
-            this.dom.updateSquare(event.index, event.square.cssClass);
+            this.dom.updateSquare(event.square.id, event.square.cssClass);
         } else if (event.type === GameViewEventType.ADD_SQUARE) {
             this.dom.addSquare(event.square.id, event.square.value, event.square.cssClass, () => this.onClick(event.square.id));
         } else {
@@ -541,5 +617,57 @@ class GameView {
     }
 }
 
+// BOT
+
+class Bot {
+    constructor(gameView) {
+        this.gameView = gameView;
+        this.asyncExe = new AsyncRepeatingExecutor(() => this.nextAction());
+        this.asyncExe.start();
+        this.gameView.dom.addBot(() => this.asyncExe.togglePause());
+    }
+    nextAction() {
+        if (this.gameView.eventQueue.eventQueue.length > 100) {
+            console.log('Bot waiting due for DOM updates');
+            return;
+        }
+        if (this.removeUsedRow()) return;
+        if (this.matchSquares()) return;
+        if (this.copyUnusedSquares()) return;
+        console.log('Stopping bot due to no possible actions to take.');
+        this.asyncExe.stop();
+    }
+    removeUsedRow() {
+        const squares = this.gameView.game.squares;
+        for (let i = 0; i < squares.length; i += 9) {
+            if (this.gameView.game.canRemoveRowBySquareIndex(i)) {
+                this.gameView.onClick(squares[i].id);
+                return true;
+            }
+        }
+        return false;
+    }
+    matchSquares() {
+        const squares = this.gameView.game.squares;
+        for (let i1 = 0; i1 < squares.length; ++i1) {
+            for (let i2 = i1 + 1; i2 < squares.length; ++i2) {
+                if (this.gameView.game.areMatchingSquares(i1, i2)) {
+                    this.gameView.onClick(squares[i1].id);
+                    this.gameView.onClick(squares[i2].id);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    copyUnusedSquares() {
+        if (this.gameView.game.canCopyUnusedSquares()) {
+            this.gameView.copyUnusedSquares();
+            return true;
+        }
+        return false;
+    }
+}
+
 const gameView = new GameView();
-gameView.init();
+const bot = new Bot(gameView);
