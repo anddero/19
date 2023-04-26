@@ -9,6 +9,29 @@ function map(arr, mapper) {
     return newArr;
 }
 
+class AsyncJobExecutor {
+    constructor() {
+        this.jobQueue = [];
+        this.running = false;
+    }
+    schedule(job) {
+        this.jobQueue.push(job);
+    }
+    wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    stop() {
+        this.running = false;
+    }
+    async start() {
+        this.running = true;
+        while (this.running) {
+            if (this.jobQueue.length > 0) this.jobQueue.shift()()
+            await this.wait(100);
+        }
+    }
+}
+
 // GAME BACKEND LOGICAL STATE
 
 const SquareStatus = {
@@ -197,29 +220,24 @@ class GameViewEventQueue {
         if (events.length === 0) console.error('Queued 0 events', this.latestState, newState, squares);
         this.latestState = newState;
         this.eventQueue = this.eventQueue.concat(events);
+        return events.length;
     }
 
     takeNextEvent() {
-        event = this.eventQueue.at(0);
-        this.eventQueue = this.eventQueue.splice(1);
-        return event;
+        return this.eventQueue.shift();
     }
 }
 
 // GAME VIEW DOM
 
 class GameViewDOM {
-    constructor(renderEventCallback) {
+    constructor(pauseToggle) {
         this.gridEl = document.getElementById('grid-container');
         while (this.gridEl.childNodes.length > 0) {
             this.gridEl.firstChild.remove();
         }
-        const nextEl1 = document.getElementById('render-next-event-button');
-        nextEl1.onclick = () => renderEventCallback(1);
-        const nextEl10 = document.getElementById('render-next-10-events-button');
-        nextEl10.onclick = () => renderEventCallback(10);
-        const nextEl100 = document.getElementById('render-next-100-events-button');
-        nextEl100.onclick = () => renderEventCallback(100);
+        const pauseEl = document.getElementById('pause-button');
+        pauseEl.onclick = pauseToggle;
     }
     addRow() {
         const row = document.createElement('div');
@@ -295,10 +313,22 @@ class GameView {
     constructor() {
         this.game = new Game();
         this.eventQueue = new GameViewEventQueue(this.game.squares);
-        this.dom = new GameViewDOM((n) => this.renderUpdates(n));
+        this.dom = new GameViewDOM(() => this.togglePause());
+        this.asyncExe = new AsyncJobExecutor();
+        this.asyncExe.start();
+    }
+    togglePause() {
+        if (this.asyncExe.running) {
+            this.asyncExe.stop();
+        } else {
+            this.asyncExe.start();
+        }
     }
     queueUpdates() {
-        this.eventQueue.queueUpdates(this.game.squares);
+        const count = this.eventQueue.queueUpdates(this.game.squares);
+        for (let i = 0; i < count; ++i) {
+            this.asyncExe.schedule(() => this.renderSingleUpdate());
+        }
     }
     onClick(id) {
         let sq = this.game.getSquare(id);
