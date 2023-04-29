@@ -72,7 +72,6 @@ class AsyncRepeatingExecutor extends AsyncExecutor {
     constructor(job) {
         super();
         this.job = job;
-        this.running = false;
     }
     singleJobRunImpl() {
         this.job();
@@ -466,7 +465,7 @@ class GameViewDOM {
             this.gridEl.firstChild.remove();
         }
         const pauseEl = document.getElementById('pause-button');
-        pauseEl.onclick = pauseToggle;
+        if (pauseEl) pauseEl.onclick = pauseToggle;
         const copyEl = document.getElementById('copy-button');
         copyEl.onclick = copyCallback;
         this.botToggle = () => console.error("No bot added");
@@ -623,12 +622,11 @@ class Bot {
     constructor(gameView) {
         this.gameView = gameView;
         this.asyncExe = new AsyncRepeatingExecutor(() => this.nextAction());
-        this.asyncExe.start();
         this.gameView.dom.addBot(() => this.asyncExe.togglePause());
         this.actionCount = 0;
     }
     nextAction() {
-        if (this.gameView.eventQueue.eventQueue.length > 100) {
+        if (this.gameView.eventQueue.eventQueue.length > 5) {
             console.log('Bot waiting due for DOM updates');
             return;
         }
